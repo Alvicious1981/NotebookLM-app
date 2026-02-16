@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Notebook {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  emoji       String   @default("📓")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sources  Source[]
+  messages ChatMessage[]
+  notes    Note[]
+}
+
+model Source {
+  id         String   @id @default(cuid())
+  notebookId String
+  title      String
+  content    String
+  type       String   @default("TEXT") // TEXT, PDF, URL, PASTE
+  fileName   String?
+  fileSize   Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  notebook Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+}
+
+model ChatMessage {
+  id         String   @id @default(cuid())
+  notebookId String
+  role       String // "user" | "assistant"
+  content    String
+  createdAt  DateTime @default(now())
+
+  notebook Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+}
+
+model Note {
+  id         String   @id @default(cuid())
+  notebookId String
+  title      String
+  content    String
+  type       String   @default("NOTE") // NOTE, SUMMARY, STUDY_GUIDE, BRIEFING, FAQ, TIMELINE, PODCAST_SCRIPT
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  notebook Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+}
