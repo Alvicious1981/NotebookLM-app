@@ -8,7 +8,18 @@ export async function GET(
   const notebook = await prisma.notebook.findUnique({
     where: { id: params.id },
     include: {
-      sources: { orderBy: { createdAt: "desc" } },
+      sources: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          fileName: true,
+          fileSize: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
       messages: { orderBy: { createdAt: "asc" } },
       notes: { orderBy: { updatedAt: "desc" } },
       _count: { select: { sources: true } },
@@ -27,6 +38,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   const body = await req.json();
+
+  if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim())) {
+    return NextResponse.json(
+      { error: "Title must be a non-empty string" },
+      { status: 400 }
+    );
+  }
+
   const notebook = await prisma.notebook.update({
     where: { id: params.id },
     data: {
@@ -42,8 +61,15 @@ export async function DELETE(
   _req: Request,
   { params }: { params: { id: string } }
 ) {
-  await prisma.notebook.delete({
-    where: { id: params.id },
-  });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.notebook.delete({
+      where: { id: params.id },
+    });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to delete notebook" },
+      { status: 500 }
+    );
+  }
 }

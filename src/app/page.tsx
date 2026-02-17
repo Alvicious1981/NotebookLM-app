@@ -66,6 +66,10 @@ export default function HomePage() {
   }
 
   async function deleteNotebook(id: string) {
+    if (!window.confirm("Delete this notebook and all its contents? This cannot be undone.")) {
+      setMenuOpen(null);
+      return;
+    }
     try {
       const res = await fetch(`/api/notebooks/${id}`, { method: "DELETE" });
       if (res.ok) {

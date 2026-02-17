@@ -20,8 +20,15 @@ export async function DELETE(
   _req: Request,
   { params }: { params: { id: string; sourceId: string } }
 ) {
-  await prisma.source.delete({
-    where: { id: params.sourceId },
-  });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.source.delete({
+      where: { id: params.sourceId },
+    });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to delete source" },
+      { status: 500 }
+    );
+  }
 }

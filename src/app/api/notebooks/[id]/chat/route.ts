@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { truncateToTokenBudget, fitMessagesInBudget } from "@/lib/utils";
+
+// Token budget constants — keeps total prompt under ~13K tokens
+const SOURCE_BUDGET = 8000;
+const HISTORY_BUDGET = 3000;
+const MAX_RESPONSE_TOKENS = 2000;
 
 export async function GET(
   _req: Request,
@@ -19,12 +25,19 @@ export async function POST(
   const body = await req.json();
   const userMessage = body.message;
 
+  if (!userMessage || typeof userMessage !== "string" || !userMessage.trim()) {
+    return NextResponse.json(
+      { error: "Message is required" },
+      { status: 400 }
+    );
+  }
+
   // Save the user message
   await prisma.chatMessage.create({
     data: {
       notebookId: params.id,
       role: "user",
-      content: userMessage,
+      content: userMessage.trim(),
     },
   });
 
@@ -34,17 +47,28 @@ export async function POST(
     select: { title: true, content: true },
   });
 
-  // Get recent chat history
+  // Budget-aware source context: distribute budget equally across sources
+  const perSourceBudget =
+    sources.length > 0 ? Math.floor(SOURCE_BUDGET / sources.length) : 0;
+
+  const sourceContext = sources
+    .map((s) => {
+      const truncated = truncateToTokenBudget(s.content, perSourceBudget - 20);
+      return `--- Source: ${s.title} ---\n${truncated}`;
+    })
+    .join("\n\n");
+
+  // Budget-aware history: fetch recent, then trim by token budget
   const history = await prisma.chatMessage.findMany({
     where: { notebookId: params.id },
     orderBy: { createdAt: "asc" },
-    take: 20,
+    take: 50,
   });
 
-  // Build the context from sources
-  const sourceContext = sources
-    .map((s) => `--- Source: ${s.title} ---\n${s.content}`)
-    .join("\n\n");
+  const fittedHistory = fitMessagesInBudget(
+    history.map((m) => ({ role: m.role, content: m.content })),
+    HISTORY_BUDGET
+  );
 
   // Try to call OpenAI API, fallback to a structured response if not configured
   let assistantContent: string;
@@ -60,7 +84,7 @@ export async function POST(
 Here are the user's sources:
 ${sourceContext || "No sources have been added yet."}`,
         },
-        ...history.map((m) => ({
+        ...fittedHistory.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
@@ -78,7 +102,7 @@ ${sourceContext || "No sources have been added yet."}`,
             model: "gpt-4o-mini",
             messages,
             temperature: 0.7,
-            max_tokens: 2000,
+            max_tokens: MAX_RESPONSE_TOKENS,
           }),
         }
       );

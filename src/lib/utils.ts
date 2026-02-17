@@ -37,3 +37,51 @@ export function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
+
+/** Rough token estimator (~4 chars per token for English text). */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Truncate text to fit within a token budget, breaking at sentence
+ * boundaries when possible.
+ */
+export function truncateToTokenBudget(
+  text: string,
+  maxTokens: number
+): string {
+  const maxChars = maxTokens * 4;
+  if (text.length <= maxChars) return text;
+
+  const truncated = text.slice(0, maxChars);
+  const lastSentenceEnd = truncated.search(/[.!?][^.!?]*$/);
+  if (lastSentenceEnd > maxChars * 0.7) {
+    return truncated.slice(0, lastSentenceEnd + 1) + "\n[...truncated]";
+  }
+  const lastNewline = truncated.lastIndexOf("\n");
+  if (lastNewline > maxChars * 0.7) {
+    return truncated.slice(0, lastNewline) + "\n[...truncated]";
+  }
+  return truncated + "...[truncated]";
+}
+
+/**
+ * Sliding window: returns the most recent messages that fit within
+ * the token budget, always keeping the latest message.
+ */
+export function fitMessagesInBudget(
+  messages: { role: string; content: string }[],
+  maxTokens: number
+): { role: string; content: string }[] {
+  const result: { role: string; content: string }[] = [];
+  let usedTokens = 0;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msgTokens = estimateTokens(messages[i].content);
+    if (usedTokens + msgTokens > maxTokens && result.length > 0) break;
+    usedTokens += msgTokens;
+    result.unshift(messages[i]);
+  }
+  return result;
+}

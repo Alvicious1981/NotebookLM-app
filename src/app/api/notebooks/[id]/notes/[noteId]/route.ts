@@ -35,8 +35,15 @@ export async function DELETE(
   _req: Request,
   { params }: { params: { id: string; noteId: string } }
 ) {
-  await prisma.note.delete({
-    where: { id: params.noteId },
-  });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.note.delete({
+      where: { id: params.noteId },
+    });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to delete note" },
+      { status: 500 }
+    );
+  }
 }
