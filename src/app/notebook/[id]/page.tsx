@@ -24,6 +24,8 @@ import {
   Sparkles,
   Copy,
   Check,
+  PanelLeftOpen,
+  PanelRightOpen,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { cn, formatDate, formatFileSize } from "@/lib/utils";
@@ -110,6 +112,25 @@ export default function NotebookPage() {
   // UX: error toast + clipboard
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Mobile: panel toggles (hidden by default on small screens)
+  const [showLeftPanel, setShowLeftPanel] = useState(false);
+  const [showRightPanel, setShowRightPanel] = useState(false);
+
+  // Escape key to close panels / viewers
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (selectedSource) { setSelectedSource(null); return; }
+        if (selectedNote) { setSelectedNote(null); return; }
+        if (addSourceMode) { setAddSourceMode(null); return; }
+        if (showLeftPanel) { setShowLeftPanel(false); return; }
+        if (showRightPanel) { setShowRightPanel(false); return; }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedSource, selectedNote, addSourceMode, showLeftPanel, showRightPanel]);
 
   // Auto-clear error after 5s
   useEffect(() => {
@@ -458,8 +479,15 @@ export default function NotebookPage() {
 
       {/* Header */}
       <header className="border-b border-surface-800 px-4 py-3 flex items-center gap-3 shrink-0">
-        <button onClick={() => router.push("/")} className="btn-ghost p-2">
+        <button onClick={() => router.push("/")} className="btn-ghost p-2" aria-label="Back to notebooks">
           <ArrowLeft className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => setShowLeftPanel(!showLeftPanel)}
+          className="btn-ghost p-2 lg:hidden"
+          aria-label="Toggle sources panel"
+        >
+          <PanelLeftOpen className="w-4 h-4" />
         </button>
         <span className="text-2xl">{notebook.emoji}</span>
         {isEditingTitle ? (
@@ -470,25 +498,52 @@ export default function NotebookPage() {
             onBlur={updateTitle}
             onKeyDown={(e) => e.key === "Enter" && updateTitle()}
             className="input-field text-lg font-semibold flex-1 max-w-md"
+            aria-label="Notebook title"
           />
         ) : (
           <h1
-            className="text-lg font-semibold text-surface-100 cursor-pointer hover:text-primary-400 transition-colors"
+            className="text-lg font-semibold text-surface-100 cursor-pointer hover:text-primary-400 transition-colors truncate"
             onClick={() => setIsEditingTitle(true)}
           >
             {notebook.title}
           </h1>
         )}
+        <div className="flex-1" />
+        <button
+          onClick={() => setShowRightPanel(!showRightPanel)}
+          className="btn-ghost p-2 lg:hidden"
+          aria-label="Toggle studio panel"
+        >
+          <PanelRightOpen className="w-4 h-4" />
+        </button>
       </header>
 
       {/* Main content: 3-column layout */}
       <div className="flex-1 flex overflow-hidden">
+        {/* Mobile overlay backdrop */}
+        {(showLeftPanel || showRightPanel) && (
+          <div
+            className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+            onClick={() => { setShowLeftPanel(false); setShowRightPanel(false); }}
+          />
+        )}
+
         {/* LEFT: Sources panel */}
-        <div className="w-72 border-r border-surface-800 flex flex-col shrink-0">
+        <aside
+          className={cn(
+            "w-72 border-r border-surface-800 flex flex-col shrink-0 bg-surface-950",
+            "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:pt-14 max-lg:transition-transform max-lg:duration-200",
+            showLeftPanel ? "max-lg:translate-x-0" : "max-lg:-translate-x-full"
+          )}
+          role="complementary"
+          aria-label="Sources panel"
+        >
           <div className="p-3 border-b border-surface-800">
             <button
               onClick={() => setSourcesExpanded(!sourcesExpanded)}
               className="flex items-center gap-2 text-sm font-medium text-surface-300 w-full"
+              aria-expanded={sourcesExpanded}
+              aria-controls="sources-list"
             >
               {sourcesExpanded ? (
                 <ChevronDown className="w-4 h-4" />
@@ -500,28 +555,33 @@ export default function NotebookPage() {
           </div>
 
           {sourcesExpanded && (
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div id="sources-list" className="flex-1 overflow-y-auto p-2 space-y-1" role="list">
               {notebook.sources.map((source) => (
-                <div
+                <button
                   key={source.id}
                   className={cn(
-                    "sidebar-item group text-sm",
+                    "sidebar-item group text-sm w-full",
                     selectedSource?.id === source.id && "sidebar-item-active"
                   )}
                   onClick={() => selectSource(source)}
+                  role="listitem"
                 >
                   <FileText className="w-4 h-4 shrink-0" />
                   <span className="truncate flex-1">{source.title}</span>
-                  <button
+                  <span
+                    role="button"
+                    tabIndex={0}
                     onClick={(e) => {
                       e.stopPropagation();
                       deleteSource(source.id);
                     }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); deleteSource(source.id); } }}
                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400"
+                    aria-label={`Delete ${source.title}`}
                   >
                     <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
+                  </span>
+                </button>
               ))}
 
               {notebook.sources.length === 0 && !addSourceMode && (
@@ -605,7 +665,7 @@ export default function NotebookPage() {
               </div>
             )}
           </div>
-        </div>
+        </aside>
 
         {/* CENTER: Chat / Source viewer / Note viewer */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -650,6 +710,7 @@ export default function NotebookPage() {
                   <button
                     onClick={() => setSelectedSource(null)}
                     className="btn-ghost p-1"
+                    aria-label="Close source viewer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -657,8 +718,13 @@ export default function NotebookPage() {
               </div>
               <div className="flex-1 overflow-y-auto p-4">
                 {loadingSource ? (
-                  <div className="flex items-center justify-center h-32">
-                    <Loader2 className="w-6 h-6 text-primary-400 animate-spin" />
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-4 bg-surface-700 rounded w-full" />
+                    <div className="h-4 bg-surface-700 rounded w-11/12" />
+                    <div className="h-4 bg-surface-700 rounded w-4/5" />
+                    <div className="h-4 bg-surface-700 rounded w-full" />
+                    <div className="h-4 bg-surface-700 rounded w-3/4" />
+                    <div className="h-4 bg-surface-700 rounded w-5/6" />
                   </div>
                 ) : (
                   <div className="prose-chat max-w-none whitespace-pre-wrap text-sm text-surface-300">
@@ -695,6 +761,7 @@ export default function NotebookPage() {
                   <button
                     onClick={() => setSelectedNote(null)}
                     className="btn-ghost p-1"
+                    aria-label="Close note viewer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -805,6 +872,7 @@ export default function NotebookPage() {
                     onClick={sendMessage}
                     disabled={!chatInput.trim() || sendingMessage}
                     className="btn-primary px-3"
+                    aria-label="Send message"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -815,7 +883,15 @@ export default function NotebookPage() {
         </div>
 
         {/* RIGHT: Notes / Studio panel */}
-        <div className="w-80 border-l border-surface-800 flex flex-col shrink-0">
+        <aside
+          className={cn(
+            "w-80 border-l border-surface-800 flex flex-col shrink-0 bg-surface-950",
+            "max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:pt-14 max-lg:transition-transform max-lg:duration-200",
+            showRightPanel ? "max-lg:translate-x-0" : "max-lg:translate-x-full"
+          )}
+          role="complementary"
+          aria-label="Studio panel"
+        >
           {/* Generate buttons */}
           <div className="p-3 border-b border-surface-800">
             <div className="flex items-center justify-between mb-2">
@@ -849,6 +925,8 @@ export default function NotebookPage() {
             <button
               onClick={() => setNotesExpanded(!notesExpanded)}
               className="flex items-center gap-2 text-sm font-medium text-surface-300"
+              aria-expanded={notesExpanded}
+              aria-controls="notes-list"
             >
               {notesExpanded ? (
                 <ChevronDown className="w-4 h-4" />
@@ -867,7 +945,7 @@ export default function NotebookPage() {
           </div>
 
           {notesExpanded && (
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div id="notes-list" className="flex-1 overflow-y-auto p-2 space-y-1" role="list">
               {notebook.notes.map((note) => (
                 <div
                   key={note.id}
@@ -910,7 +988,7 @@ export default function NotebookPage() {
               )}
             </div>
           )}
-        </div>
+        </aside>
       </div>
     </div>
   );

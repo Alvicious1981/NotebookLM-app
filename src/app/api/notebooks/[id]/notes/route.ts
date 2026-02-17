@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { truncateToTokenBudget } from "@/lib/utils";
+
+const SOURCE_BUDGET_PER_NOTE = 10000; // Total tokens budget for note generation
 
 export async function GET(
   _req: Request,
@@ -20,17 +23,24 @@ export async function POST(
 
   // If generating a note type (summary, study guide, etc), build it from sources
   if (body.type && body.type !== "NOTE") {
-    const sources = await prisma.source.findMany({
+    const rawSources = await prisma.source.findMany({
       where: { notebookId: params.id },
       select: { title: true, content: true },
     });
 
-    if (sources.length === 0) {
+    if (rawSources.length === 0) {
       return NextResponse.json(
         { error: "No sources available to generate from" },
         { status: 400 }
       );
     }
+
+    // Truncate sources to fit within token budget
+    const perSourceBudget = Math.floor(SOURCE_BUDGET_PER_NOTE / rawSources.length);
+    const sources = rawSources.map((s) => ({
+      title: s.title,
+      content: truncateToTokenBudget(s.content, perSourceBudget),
+    }));
 
     let content = "";
     let title = "";
