@@ -18,6 +18,23 @@ export async function GET(
   return NextResponse.json(messages);
 }
 
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await prisma.chatMessage.deleteMany({
+      where: { notebookId: params.id },
+    });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to clear chat" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(
   req: Request,
   { params }: { params: { id: string } }

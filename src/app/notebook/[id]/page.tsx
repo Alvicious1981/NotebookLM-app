@@ -30,6 +30,8 @@ import {
   MoreVertical,
   Save,
   Edit3,
+  MessageSquareX,
+  CheckCircle2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useDropzone } from "react-dropzone";
@@ -114,9 +116,20 @@ export default function NotebookPage() {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [generatingNote, setGeneratingNote] = useState<string | null>(null);
 
-  // UX: error toast + clipboard
+  // UX: error/success toast + clipboard
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Source editing
+  const [editingSource, setEditingSource] = useState(false);
+  const [editSourceTitle, setEditSourceTitle] = useState("");
+  const [editSourceContent, setEditSourceContent] = useState("");
+  const [savingSource, setSavingSource] = useState(false);
+
+  // Description/emoji editing
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [editDescription, setEditDescription] = useState("");
 
   // Mobile: panel toggles (hidden by default on small screens)
   const [showLeftPanel, setShowLeftPanel] = useState(false);
@@ -140,6 +153,8 @@ export default function NotebookPage() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         if (editingNote) { setEditingNote(false); return; }
+        if (editingSource) { setEditingSource(false); return; }
+        if (editingDescription) { setEditingDescription(false); return; }
         if (headerMenuOpen) { setHeaderMenuOpen(false); return; }
         if (selectedSource) { setSelectedSource(null); return; }
         if (selectedNote) { setSelectedNote(null); return; }
@@ -150,15 +165,25 @@ export default function NotebookPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedSource, selectedNote, addSourceMode, showLeftPanel, showRightPanel, editingNote, headerMenuOpen]);
+  }, [selectedSource, selectedNote, addSourceMode, showLeftPanel, showRightPanel, editingNote, editingSource, editingDescription, headerMenuOpen]);
 
-  // Auto-clear error after 5s
+  // Auto-clear toasts after 4s
   useEffect(() => {
     if (error) {
-      const t = setTimeout(() => setError(null), 5000);
+      const t = setTimeout(() => setError(null), 4000);
       return () => clearTimeout(t);
     }
   }, [error]);
+  useEffect(() => {
+    if (success) {
+      const t = setTimeout(() => setSuccess(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [success]);
+
+  // Auto-save debounce for notes
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveNoteRef = useRef<{ id: string; title: string; content: string } | null>(null);
 
   const fetchNotebook = useCallback(async () => {
     try {
@@ -184,6 +209,42 @@ export default function NotebookPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [notebook?.messages]);
+
+  // Auto-save effect for note editing
+  useEffect(() => {
+    if (!editingNote || !selectedNote) return;
+    autoSaveNoteRef.current = {
+      id: selectedNote.id,
+      title: editNoteTitle,
+      content: editNoteContent,
+    };
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(async () => {
+      const ref = autoSaveNoteRef.current;
+      if (!ref) return;
+      try {
+        const res = await fetch(
+          `/api/notebooks/${notebookId}/notes/${ref.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: ref.title.trim() || "Untitled", content: ref.content }),
+          }
+        );
+        if (res.ok) {
+          const updated = await res.json();
+          setNotebook((prev) =>
+            prev
+              ? { ...prev, notes: prev.notes.map((n) => (n.id === updated.id ? updated : n)) }
+              : prev
+          );
+        }
+      } catch { /* silent auto-save */ }
+    }, 1500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [editNoteTitle, editNoteContent, editingNote, selectedNote, notebookId]);
 
   // --- Actions ---
 
@@ -279,6 +340,7 @@ export default function NotebookPage() {
         setNewSourceContent("");
         setNewSourceUrl("");
         setAddSourceMode(null);
+        setSuccess("Source added");
       } else {
         setError("Failed to add source");
       }
@@ -402,6 +464,7 @@ export default function NotebookPage() {
         );
         setSelectedNote(note);
         setSelectedSource(null);
+        setSuccess("Note generated");
       } else {
         setError("Failed to generate note");
       }
@@ -507,6 +570,7 @@ export default function NotebookPage() {
         );
         setSelectedNote(updated);
         setEditingNote(false);
+        setSuccess("Note saved");
       } else {
         setError("Failed to save note");
       }
@@ -562,6 +626,7 @@ export default function NotebookPage() {
           setNotebook((prev) =>
             prev ? { ...prev, sources: [newSource, ...prev.sources] } : prev
           );
+          setSuccess(`Uploaded ${file.name}`);
         } else {
           const data = await res.json().catch(() => null);
           setError(data?.error || `Failed to upload ${file.name}`);
@@ -583,6 +648,94 @@ export default function NotebookPage() {
     },
     noClick: true,
   });
+
+  // Source editing
+  function startEditingSource() {
+    if (!selectedSource) return;
+    setEditSourceTitle(selectedSource.title);
+    setEditSourceContent(selectedSource.content || "");
+    setEditingSource(true);
+  }
+
+  async function saveSource() {
+    if (!selectedSource) return;
+    setSavingSource(true);
+    try {
+      const res = await fetch(
+        `/api/notebooks/${notebookId}/sources/${selectedSource.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: editSourceTitle.trim() || selectedSource.title,
+            content: editSourceContent,
+          }),
+        }
+      );
+      if (res.ok) {
+        const updated = await res.json();
+        setNotebook((prev) =>
+          prev
+            ? { ...prev, sources: prev.sources.map((s) => (s.id === updated.id ? updated : s)) }
+            : prev
+        );
+        setSelectedSource(updated);
+        setEditingSource(false);
+        setSuccess("Source saved");
+      } else {
+        setError("Failed to save source");
+      }
+    } catch {
+      setError("Failed to save source");
+    }
+    setSavingSource(false);
+  }
+
+  // Description editing
+  async function updateDescription() {
+    const desc = editDescription.trim();
+    try {
+      await fetch(`/api/notebooks/${notebookId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: desc || null }),
+      });
+      setNotebook((prev) =>
+        prev ? { ...prev, description: desc || null } : prev
+      );
+    } catch { /* silent */ }
+    setEditingDescription(false);
+  }
+
+  // Emoji editing
+  async function updateEmoji(emoji: string) {
+    try {
+      await fetch(`/api/notebooks/${notebookId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
+      setNotebook((prev) => (prev ? { ...prev, emoji } : prev));
+    } catch { /* silent */ }
+  }
+
+  // Clear chat history
+  async function clearChat() {
+    if (!window.confirm("Clear all chat messages? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/notebooks/${notebookId}/chat`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setNotebook((prev) => (prev ? { ...prev, messages: [] } : prev));
+        setSuccess("Chat cleared");
+      } else {
+        setError("Failed to clear chat");
+      }
+    } catch {
+      setError("Failed to clear chat");
+    }
+  }
 
   // Filtered lists
   const filteredSources = notebook
@@ -612,7 +765,7 @@ export default function NotebookPage() {
 
   return (
     <div className="h-screen bg-surface-950 flex flex-col overflow-hidden">
-      {/* Error toast */}
+      {/* Toasts */}
       {error && (
         <div className="fixed top-4 right-4 z-50 bg-red-900/90 border border-red-700 text-red-200 px-4 py-3 rounded-lg shadow-lg text-sm flex items-center gap-2 max-w-md animate-in fade-in">
           <span>{error}</span>
@@ -622,6 +775,12 @@ export default function NotebookPage() {
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+      {success && (
+        <div className="fixed top-4 right-4 z-50 bg-green-900/90 border border-green-700 text-green-200 px-4 py-3 rounded-lg shadow-lg text-sm flex items-center gap-2 max-w-md animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 
@@ -637,25 +796,58 @@ export default function NotebookPage() {
         >
           <PanelLeftOpen className="w-4 h-4" />
         </button>
-        <span className="text-2xl">{notebook.emoji}</span>
-        {isEditingTitle ? (
-          <input
-            autoFocus
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={updateTitle}
-            onKeyDown={(e) => e.key === "Enter" && updateTitle()}
-            className="input-field text-lg font-semibold flex-1 max-w-md"
-            aria-label="Notebook title"
-          />
-        ) : (
-          <h1
-            className="text-lg font-semibold text-surface-100 cursor-pointer hover:text-primary-400 transition-colors truncate"
-            onClick={() => setIsEditingTitle(true)}
-          >
-            {notebook.title}
-          </h1>
-        )}
+        <button
+          className="text-2xl hover:scale-110 transition-transform"
+          title="Change emoji"
+          onClick={() => {
+            const emojis = ["📓", "📕", "📗", "📘", "📙", "📚", "🔬", "🧪", "🎯", "💡", "🧠", "📝", "🗂️", "🔍", "🎓", "📊"];
+            const current = emojis.indexOf(notebook.emoji);
+            updateEmoji(emojis[(current + 1) % emojis.length]);
+          }}
+        >
+          {notebook.emoji}
+        </button>
+        <div className="min-w-0">
+          {isEditingTitle ? (
+            <input
+              autoFocus
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={updateTitle}
+              onKeyDown={(e) => e.key === "Enter" && updateTitle()}
+              className="input-field text-lg font-semibold w-full max-w-md"
+              aria-label="Notebook title"
+            />
+          ) : (
+            <h1
+              className="text-lg font-semibold text-surface-100 cursor-pointer hover:text-primary-400 transition-colors truncate"
+              onClick={() => setIsEditingTitle(true)}
+            >
+              {notebook.title}
+            </h1>
+          )}
+          {editingDescription ? (
+            <input
+              autoFocus
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              onBlur={updateDescription}
+              onKeyDown={(e) => e.key === "Enter" && updateDescription()}
+              placeholder="Add a description..."
+              className="input-field text-xs w-full max-w-md mt-0.5"
+            />
+          ) : (
+            <p
+              className="text-xs text-surface-500 truncate cursor-pointer hover:text-surface-400 transition-colors"
+              onClick={() => {
+                setEditDescription(notebook.description || "");
+                setEditingDescription(true);
+              }}
+            >
+              {notebook.description || "Add a description..."}
+            </p>
+          )}
+        </div>
         <div className="flex-1" />
         <div className="relative">
           <button
@@ -668,7 +860,19 @@ export default function NotebookPage() {
           {headerMenuOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-[160px]">
+              <div className="absolute right-0 top-full mt-1 z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-[180px]">
+                {notebook.messages.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      clearChat();
+                    }}
+                    className="w-full px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 text-left flex items-center gap-2"
+                  >
+                    <MessageSquareX className="w-3.5 h-3.5" />
+                    Clear chat history
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setHeaderMenuOpen(false);
@@ -894,50 +1098,97 @@ export default function NotebookPage() {
         {/* CENTER: Chat / Source viewer / Note viewer */}
         <div className="flex-1 flex flex-col min-w-0">
           {selectedSource ? (
-            /* Source viewer */
+            /* Source viewer / editor */
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-surface-800">
-                <div>
-                  <h2 className="font-medium text-surface-100">
-                    {selectedSource.title}
-                  </h2>
-                  <div className="flex items-center gap-3 text-xs text-surface-500 mt-0.5">
-                    <span>{selectedSource.type}</span>
-                    {selectedSource.content && (
-                      <span>
-                        {selectedSource.content.split(/\s+/).filter(Boolean).length}{" "}
-                        words
-                      </span>
-                    )}
-                    {selectedSource.fileSize && (
-                      <span>{formatFileSize(selectedSource.fileSize)}</span>
-                    )}
-                    <span>{formatDate(selectedSource.createdAt)}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  {selectedSource.content && (
-                    <button
-                      onClick={() =>
-                        copyToClipboard(selectedSource.content || "")
-                      }
-                      className="btn-ghost p-1"
-                      title="Copy to clipboard"
-                    >
-                      {copied ? (
-                        <Check className="w-4 h-4 text-green-400" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                    </button>
+                <div className="flex-1 min-w-0">
+                  {editingSource ? (
+                    <input
+                      value={editSourceTitle}
+                      onChange={(e) => setEditSourceTitle(e.target.value)}
+                      className="input-field font-medium text-sm w-full"
+                      placeholder="Source title"
+                    />
+                  ) : (
+                    <>
+                      <h2 className="font-medium text-surface-100">
+                        {selectedSource.title}
+                      </h2>
+                      <div className="flex items-center gap-3 text-xs text-surface-500 mt-0.5">
+                        <span>{selectedSource.type}</span>
+                        {selectedSource.content && (
+                          <span>
+                            {selectedSource.content.split(/\s+/).filter(Boolean).length}{" "}
+                            words
+                          </span>
+                        )}
+                        {selectedSource.fileSize && (
+                          <span>{formatFileSize(selectedSource.fileSize)}</span>
+                        )}
+                        <span>{formatDate(selectedSource.createdAt)}</span>
+                      </div>
+                    </>
                   )}
-                  <button
-                    onClick={() => setSelectedSource(null)}
-                    className="btn-ghost p-1"
-                    aria-label="Close source viewer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                </div>
+                <div className="flex items-center gap-1 ml-2">
+                  {editingSource ? (
+                    <>
+                      <button
+                        onClick={saveSource}
+                        disabled={savingSource}
+                        className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5"
+                      >
+                        {savingSource ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Save className="w-3 h-3" />
+                        )}
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingSource(false)}
+                        className="btn-ghost p-1"
+                        aria-label="Cancel editing"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {!loadingSource && selectedSource.content !== undefined && (
+                        <button
+                          onClick={startEditingSource}
+                          className="btn-ghost p-1"
+                          title="Edit source"
+                          aria-label="Edit source"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {selectedSource.content && (
+                        <button
+                          onClick={() =>
+                            copyToClipboard(selectedSource.content || "")
+                          }
+                          className="btn-ghost p-1"
+                          title="Copy to clipboard"
+                        >
+                          {copied ? (
+                            <Check className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { setSelectedSource(null); setEditingSource(false); }}
+                        className="btn-ghost p-1"
+                        aria-label="Close source viewer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-4">
@@ -950,6 +1201,13 @@ export default function NotebookPage() {
                     <div className="h-4 bg-surface-700 rounded w-3/4" />
                     <div className="h-4 bg-surface-700 rounded w-5/6" />
                   </div>
+                ) : editingSource ? (
+                  <textarea
+                    value={editSourceContent}
+                    onChange={(e) => setEditSourceContent(e.target.value)}
+                    className="w-full h-full bg-transparent text-sm text-surface-300 resize-none focus:outline-none font-mono"
+                    placeholder="Source content..."
+                  />
                 ) : (
                   <div className="prose-chat max-w-none whitespace-pre-wrap text-sm text-surface-300">
                     {selectedSource.content || "No content available"}

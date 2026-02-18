@@ -16,6 +16,28 @@ export async function GET(
   return NextResponse.json(source);
 }
 
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string; sourceId: string } }
+) {
+  try {
+    const body = await req.json();
+    const source = await prisma.source.update({
+      where: { id: params.sourceId },
+      data: {
+        ...(body.title !== undefined && { title: body.title }),
+        ...(body.content !== undefined && { content: body.content }),
+      },
+    });
+    return NextResponse.json(source);
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to update source" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function DELETE(
   _req: Request,
   { params }: { params: { id: string; sourceId: string } }
