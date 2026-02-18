@@ -26,8 +26,13 @@ import {
   Check,
   PanelLeftOpen,
   PanelRightOpen,
+  Search,
+  MoreVertical,
+  Save,
+  Edit3,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { useDropzone } from "react-dropzone";
 import { cn, formatDate, formatFileSize } from "@/lib/utils";
 
 interface Source {
@@ -117,10 +122,25 @@ export default function NotebookPage() {
   const [showLeftPanel, setShowLeftPanel] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(false);
 
+  // Search filters
+  const [sourceSearch, setSourceSearch] = useState("");
+  const [noteSearch, setNoteSearch] = useState("");
+
+  // Note editing
+  const [editingNote, setEditingNote] = useState(false);
+  const [editNoteTitle, setEditNoteTitle] = useState("");
+  const [editNoteContent, setEditNoteContent] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  // Notebook header menu (delete)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+
   // Escape key to close panels / viewers
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        if (editingNote) { setEditingNote(false); return; }
+        if (headerMenuOpen) { setHeaderMenuOpen(false); return; }
         if (selectedSource) { setSelectedSource(null); return; }
         if (selectedNote) { setSelectedNote(null); return; }
         if (addSourceMode) { setAddSourceMode(null); return; }
@@ -130,7 +150,7 @@ export default function NotebookPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedSource, selectedNote, addSourceMode, showLeftPanel, showRightPanel]);
+  }, [selectedSource, selectedNote, addSourceMode, showLeftPanel, showRightPanel, editingNote, headerMenuOpen]);
 
   // Auto-clear error after 5s
   useEffect(() => {
@@ -450,6 +470,134 @@ export default function NotebookPage() {
     }
   }
 
+  // Note editing
+  function startEditingNote() {
+    if (!selectedNote) return;
+    setEditNoteTitle(selectedNote.title);
+    setEditNoteContent(selectedNote.content);
+    setEditingNote(true);
+  }
+
+  async function saveNote() {
+    if (!selectedNote) return;
+    setSavingNote(true);
+    try {
+      const res = await fetch(
+        `/api/notebooks/${notebookId}/notes/${selectedNote.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: editNoteTitle.trim() || selectedNote.title,
+            content: editNoteContent,
+          }),
+        }
+      );
+      if (res.ok) {
+        const updated = await res.json();
+        setNotebook((prev) =>
+          prev
+            ? {
+                ...prev,
+                notes: prev.notes.map((n) =>
+                  n.id === updated.id ? updated : n
+                ),
+              }
+            : prev
+        );
+        setSelectedNote(updated);
+        setEditingNote(false);
+      } else {
+        setError("Failed to save note");
+      }
+    } catch {
+      setError("Failed to save note");
+    }
+    setSavingNote(false);
+  }
+
+  // Delete notebook from within
+  async function deleteNotebook() {
+    if (
+      !window.confirm(
+        "Delete this notebook and all its contents? This cannot be undone."
+      )
+    )
+      return;
+    try {
+      const res = await fetch(`/api/notebooks/${notebookId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        router.push("/");
+      } else {
+        setError("Failed to delete notebook");
+      }
+    } catch {
+      setError("Failed to delete notebook");
+    }
+  }
+
+  // File upload handler
+  async function handleFileDrop(acceptedFiles: File[]) {
+    for (const file of acceptedFiles) {
+      const text = await file.text();
+      if (!text.trim()) continue;
+
+      setAddingSource(true);
+      try {
+        const res = await fetch(`/api/notebooks/${notebookId}/sources`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: file.name,
+            content: text,
+            type: "FILE",
+            fileName: file.name,
+            fileSize: file.size,
+          }),
+        });
+        if (res.ok) {
+          const newSource = await res.json();
+          setNotebook((prev) =>
+            prev ? { ...prev, sources: [newSource, ...prev.sources] } : prev
+          );
+        } else {
+          const data = await res.json().catch(() => null);
+          setError(data?.error || `Failed to upload ${file.name}`);
+        }
+      } catch {
+        setError(`Failed to upload ${file.name}`);
+      }
+      setAddingSource(false);
+    }
+  }
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: handleFileDrop,
+    accept: {
+      "text/plain": [".txt"],
+      "text/markdown": [".md"],
+      "text/csv": [".csv"],
+      "application/json": [".json"],
+    },
+    noClick: true,
+  });
+
+  // Filtered lists
+  const filteredSources = notebook
+    ? notebook.sources.filter((s) =>
+        s.title.toLowerCase().includes(sourceSearch.toLowerCase())
+      )
+    : [];
+  const filteredNotes = notebook
+    ? notebook.notes.filter(
+        (n) =>
+          n.title.toLowerCase().includes(noteSearch.toLowerCase()) ||
+          n.type.toLowerCase().includes(noteSearch.toLowerCase())
+      )
+    : [];
+
   // --- Render ---
 
   if (loading) {
@@ -509,6 +657,32 @@ export default function NotebookPage() {
           </h1>
         )}
         <div className="flex-1" />
+        <div className="relative">
+          <button
+            onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
+            className="btn-ghost p-2"
+            aria-label="Notebook options"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+          {headerMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-[160px]">
+                <button
+                  onClick={() => {
+                    setHeaderMenuOpen(false);
+                    deleteNotebook();
+                  }}
+                  className="w-full px-3 py-2 text-sm text-red-400 hover:bg-surface-700 text-left flex items-center gap-2"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete notebook
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <button
           onClick={() => setShowRightPanel(!showRightPanel)}
           className="btn-ghost p-2 lg:hidden"
@@ -555,8 +729,37 @@ export default function NotebookPage() {
           </div>
 
           {sourcesExpanded && (
-            <div id="sources-list" className="flex-1 overflow-y-auto p-2 space-y-1" role="list">
-              {notebook.sources.map((source) => (
+            <div id="sources-list" className="flex-1 overflow-y-auto flex flex-col" role="list">
+              {notebook.sources.length > 3 && (
+                <div className="px-2 pt-2">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-surface-500" />
+                    <input
+                      value={sourceSearch}
+                      onChange={(e) => setSourceSearch(e.target.value)}
+                      placeholder="Filter sources..."
+                      className="input-field w-full text-xs pl-7 py-1.5"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div
+                {...getRootProps()}
+                className={cn(
+                  "flex-1 p-2 space-y-1 transition-colors",
+                  isDragActive && "bg-primary-900/20 ring-1 ring-primary-500/30 ring-inset"
+                )}
+              >
+                <input {...getInputProps()} />
+                {isDragActive && (
+                  <div className="flex flex-col items-center justify-center py-6 text-primary-400 text-xs">
+                    <Upload className="w-6 h-6 mb-1" />
+                    Drop files here
+                  </div>
+                )}
+
+              {filteredSources.map((source) => (
                 <button
                   key={source.id}
                   className={cn(
@@ -588,10 +791,17 @@ export default function NotebookPage() {
                 <div className="text-center py-8 px-3">
                   <Upload className="w-8 h-8 text-surface-600 mx-auto mb-2" />
                   <p className="text-xs text-surface-500">
-                    Add sources to get started
+                    Add sources or drop files here
                   </p>
                 </div>
               )}
+
+              {sourceSearch && filteredSources.length === 0 && notebook.sources.length > 0 && (
+                <p className="text-xs text-surface-500 text-center py-4">
+                  No sources match &ldquo;{sourceSearch}&rdquo;
+                </p>
+              )}
+              </div>
             </div>
           )}
 
@@ -662,6 +872,20 @@ export default function NotebookPage() {
                   <Link className="w-3 h-3" />
                   URL
                 </button>
+                <label className="btn-ghost text-xs flex-1 flex items-center justify-center gap-1.5 cursor-pointer">
+                  <Upload className="w-3 h-3" />
+                  File
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".txt,.md,.csv,.json"
+                    multiple
+                    onChange={(e) => {
+                      if (e.target.files) handleFileDrop(Array.from(e.target.files));
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
               </div>
             )}
           </div>
@@ -734,43 +958,100 @@ export default function NotebookPage() {
               </div>
             </div>
           ) : selectedNote ? (
-            /* Note viewer */
+            /* Note viewer / editor */
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-surface-800">
-                <div>
-                  <h2 className="font-medium text-surface-100">
-                    {selectedNote.title}
-                  </h2>
-                  <span className="text-xs text-surface-500">
-                    {selectedNote.type} &middot;{" "}
-                    {formatDate(selectedNote.updatedAt)}
-                  </span>
+                <div className="flex-1 min-w-0">
+                  {editingNote ? (
+                    <input
+                      value={editNoteTitle}
+                      onChange={(e) => setEditNoteTitle(e.target.value)}
+                      className="input-field font-medium text-sm w-full"
+                      placeholder="Note title"
+                    />
+                  ) : (
+                    <>
+                      <h2 className="font-medium text-surface-100">
+                        {selectedNote.title}
+                      </h2>
+                      <span className="text-xs text-surface-500">
+                        {selectedNote.type} &middot;{" "}
+                        {formatDate(selectedNote.updatedAt)}
+                      </span>
+                    </>
+                  )}
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => copyToClipboard(selectedNote.content)}
-                    className="btn-ghost p-1"
-                    title="Copy to clipboard"
-                  >
-                    {copied ? (
-                      <Check className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setSelectedNote(null)}
-                    className="btn-ghost p-1"
-                    aria-label="Close note viewer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                <div className="flex items-center gap-1 ml-2">
+                  {editingNote ? (
+                    <>
+                      <button
+                        onClick={saveNote}
+                        disabled={savingNote}
+                        className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5"
+                      >
+                        {savingNote ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Save className="w-3 h-3" />
+                        )}
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingNote(false)}
+                        className="btn-ghost p-1"
+                        aria-label="Cancel editing"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={startEditingNote}
+                        className="btn-ghost p-1"
+                        title="Edit note"
+                        aria-label="Edit note"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(selectedNote.content)}
+                        className="btn-ghost p-1"
+                        title="Copy to clipboard"
+                      >
+                        {copied ? (
+                          <Check className="w-4 h-4 text-green-400" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedNote(null);
+                          setEditingNote(false);
+                        }}
+                        className="btn-ghost p-1"
+                        aria-label="Close note viewer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-4">
-                <div className="prose-chat max-w-none text-sm text-surface-300">
-                  <ReactMarkdown>{selectedNote.content}</ReactMarkdown>
-                </div>
+                {editingNote ? (
+                  <textarea
+                    value={editNoteContent}
+                    onChange={(e) => setEditNoteContent(e.target.value)}
+                    className="w-full h-full bg-transparent text-sm text-surface-300 resize-none focus:outline-none font-mono"
+                    placeholder="Write your note content here (supports Markdown)..."
+                  />
+                ) : (
+                  <div className="prose-chat max-w-none text-sm text-surface-300">
+                    <ReactMarkdown>{selectedNote.content}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -945,8 +1226,22 @@ export default function NotebookPage() {
           </div>
 
           {notesExpanded && (
-            <div id="notes-list" className="flex-1 overflow-y-auto p-2 space-y-1" role="list">
-              {notebook.notes.map((note) => (
+            <div id="notes-list" className="flex-1 overflow-y-auto flex flex-col" role="list">
+              {notebook.notes.length > 3 && (
+                <div className="px-2 pt-2">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-surface-500" />
+                    <input
+                      value={noteSearch}
+                      onChange={(e) => setNoteSearch(e.target.value)}
+                      placeholder="Filter notes..."
+                      className="input-field w-full text-xs pl-7 py-1.5"
+                    />
+                  </div>
+                </div>
+              )}
+              <div className="p-2 space-y-1">
+              {filteredNotes.map((note) => (
                 <div
                   key={note.id}
                   className={cn(
@@ -986,6 +1281,13 @@ export default function NotebookPage() {
                   </p>
                 </div>
               )}
+
+              {noteSearch && filteredNotes.length === 0 && notebook.notes.length > 0 && (
+                <p className="text-xs text-surface-500 text-center py-4">
+                  No notes match &ldquo;{noteSearch}&rdquo;
+                </p>
+              )}
+              </div>
             </div>
           )}
         </aside>
