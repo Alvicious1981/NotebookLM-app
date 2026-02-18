@@ -6,7 +6,7 @@ export async function GET() {
     orderBy: { updatedAt: "desc" },
     include: {
       _count: {
-        select: { sources: true },
+        select: { sources: true, notes: true },
       },
     },
   });
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     },
     include: {
       _count: {
-        select: { sources: true },
+        select: { sources: true, notes: true },
       },
     },
   });

@@ -9,6 +9,9 @@ import {
   MoreVertical,
   Search,
   Sparkles,
+  ArrowUpDown,
+  FileText,
+  PenLine,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -21,8 +24,11 @@ interface Notebook {
   updatedAt: string;
   _count: {
     sources: number;
+    notes: number;
   };
 }
+
+type SortOption = "updated" | "created" | "title" | "sources";
 
 export default function HomePage() {
   const router = useRouter();
@@ -30,6 +36,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortOption>("updated");
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
   useEffect(() => {
     fetchNotebooks();
@@ -81,11 +89,32 @@ export default function HomePage() {
     setMenuOpen(null);
   }
 
-  const filteredNotebooks = notebooks.filter(
-    (n) =>
-      n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredNotebooks = notebooks
+    .filter(
+      (n) =>
+        n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        n.description?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "title":
+          return a.title.localeCompare(b.title);
+        case "created":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "sources":
+          return b._count.sources - a._count.sources;
+        case "updated":
+        default:
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
+    });
+
+  const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+    { value: "updated", label: "Last updated" },
+    { value: "created", label: "Date created" },
+    { value: "title", label: "Title (A-Z)" },
+    { value: "sources", label: "Most sources" },
+  ];
 
   return (
     <div className="min-h-screen bg-surface-950">
@@ -115,7 +144,7 @@ export default function HomePage() {
         </div>
 
         {/* Actions bar */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
             <input
@@ -126,11 +155,57 @@ export default function HomePage() {
               className="input-field w-full pl-10"
             />
           </div>
-          <button onClick={createNotebook} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            New notebook
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Sort dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setSortMenuOpen(!sortMenuOpen)}
+                className="btn-ghost flex items-center gap-1.5 text-sm"
+                aria-label="Sort notebooks"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {SORT_OPTIONS.find((o) => o.value === sortBy)?.label}
+                </span>
+              </button>
+              {sortMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-[160px]">
+                    {SORT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => {
+                          setSortBy(opt.value);
+                          setSortMenuOpen(false);
+                        }}
+                        className={cn(
+                          "w-full px-3 py-2 text-sm text-left hover:bg-surface-700 transition-colors",
+                          sortBy === opt.value
+                            ? "text-primary-400"
+                            : "text-surface-300"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <button onClick={createNotebook} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">New notebook</span>
+            </button>
+          </div>
         </div>
+
+        {/* Result count */}
+        {searchQuery && !loading && (
+          <p className="text-xs text-surface-500 mb-3">
+            {filteredNotebooks.length} result{filteredNotebooks.length !== 1 && "s"} for &ldquo;{searchQuery}&rdquo;
+          </p>
+        )}
 
         {/* Notebooks grid */}
         {loading ? (
@@ -186,22 +261,26 @@ export default function HomePage() {
                         );
                       }}
                       className="btn-ghost p-1 opacity-0 group-hover:opacity-100"
+                      aria-label="Notebook options"
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
                     {menuOpen === notebook.id && (
-                      <div className="absolute right-0 top-8 bg-surface-700 border border-surface-600 rounded-lg shadow-xl z-10 py-1 min-w-[140px]">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteNotebook(notebook.id);
-                          }}
-                          className="flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-surface-600 w-full text-left text-sm"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Delete
-                        </button>
-                      </div>
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpen(null); }} />
+                        <div className="absolute right-0 top-8 bg-surface-700 border border-surface-600 rounded-lg shadow-xl z-50 py-1 min-w-[140px]">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteNotebook(notebook.id);
+                            }}
+                            className="flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-surface-600 w-full text-left text-sm"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -214,8 +293,15 @@ export default function HomePage() {
                   </p>
                 )}
                 <div className="flex items-center gap-3 text-xs text-surface-500 mt-3">
-                  <span>{notebook._count.sources} sources</span>
-                  <span>{formatDate(notebook.updatedAt)}</span>
+                  <span className="flex items-center gap-1">
+                    <FileText className="w-3 h-3" />
+                    {notebook._count.sources}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <PenLine className="w-3 h-3" />
+                    {notebook._count.notes}
+                  </span>
+                  <span className="ml-auto">{formatDate(notebook.updatedAt)}</span>
                 </div>
               </div>
             ))}

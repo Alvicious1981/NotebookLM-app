@@ -146,3 +146,23 @@ a:focus-visible,
 .prose-chat strong {
   @apply font-semibold text-surface-100;
 }
+
+.prose-chat hr {
+  @apply border-surface-700 my-4;
+}
+
+.prose-chat table {
+  @apply w-full mb-3 border-collapse text-sm;
+}
+
+.prose-chat th {
+  @apply bg-surface-800 border border-surface-700 px-3 py-2 text-left font-semibold text-surface-100;
+}
+
+.prose-chat td {
+  @apply border border-surface-700 px-3 py-2 text-surface-300;
+}
+
+.prose-chat input[type="checkbox"] {
+  @apply mr-2 accent-primary-500;
+}

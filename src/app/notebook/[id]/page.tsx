@@ -32,8 +32,11 @@ import {
   Edit3,
   MessageSquareX,
   CheckCircle2,
+  Download,
+  Keyboard,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useDropzone } from "react-dropzone";
 import { cn, formatDate, formatFileSize } from "@/lib/utils";
 
@@ -148,10 +151,14 @@ export default function NotebookPage() {
   // Notebook header menu (delete)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
+  // Keyboard shortcuts help
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
   // Escape key to close panels / viewers
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        if (showShortcuts) { setShowShortcuts(false); return; }
         if (editingNote) { setEditingNote(false); return; }
         if (editingSource) { setEditingSource(false); return; }
         if (editingDescription) { setEditingDescription(false); return; }
@@ -161,6 +168,11 @@ export default function NotebookPage() {
         if (addSourceMode) { setAddSourceMode(null); return; }
         if (showLeftPanel) { setShowLeftPanel(false); return; }
         if (showRightPanel) { setShowRightPanel(false); return; }
+      }
+      // ? key for shortcuts help (when not typing in input)
+      const tag = (e.target as HTMLElement).tagName;
+      if (e.key === "?" && tag !== "INPUT" && tag !== "TEXTAREA") {
+        setShowShortcuts((prev) => !prev);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -737,6 +749,42 @@ export default function NotebookPage() {
     }
   }
 
+  // Export chat as markdown
+  function exportChat() {
+    if (!notebook) return;
+    const lines = [`# Chat - ${notebook.title}\n`];
+    notebook.messages.forEach((msg) => {
+      const role = msg.role === "user" ? "**You**" : "**Assistant**";
+      lines.push(`${role}: ${msg.content}\n`);
+    });
+    downloadFile(`${notebook.title} - Chat.md`, lines.join("\n"));
+    setSuccess("Chat exported");
+  }
+
+  // Export all notes as markdown
+  function exportNotes() {
+    if (!notebook) return;
+    const lines = [`# Notes - ${notebook.title}\n`];
+    notebook.notes.forEach((note) => {
+      lines.push(`## ${note.title}\n`);
+      lines.push(`*${note.type} - ${formatDate(note.updatedAt)}*\n`);
+      lines.push(`${note.content}\n`);
+      lines.push("---\n");
+    });
+    downloadFile(`${notebook.title} - Notes.md`, lines.join("\n"));
+    setSuccess("Notes exported");
+  }
+
+  function downloadFile(filename: string, content: string) {
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Filtered lists
   const filteredSources = notebook
     ? notebook.sources.filter((s) =>
@@ -782,6 +830,38 @@ export default function NotebookPage() {
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{success}</span>
         </div>
+      )}
+
+      {/* Keyboard shortcuts modal */}
+      {showShortcuts && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-50" onClick={() => setShowShortcuts(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-surface-800 border border-surface-700 rounded-xl shadow-2xl max-w-sm w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-surface-100">Keyboard shortcuts</h2>
+                <button onClick={() => setShowShortcuts(false)} className="btn-ghost p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="space-y-2 text-sm">
+                {[
+                  ["Esc", "Close panel / cancel editing"],
+                  ["Enter", "Send message / save title"],
+                  ["?", "Toggle this help"],
+                  ["Click emoji", "Cycle notebook emoji"],
+                  ["Click title", "Edit notebook title"],
+                  ["Click description", "Edit description"],
+                ].map(([key, desc]) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-surface-400">{desc}</span>
+                    <kbd className="bg-surface-700 text-surface-200 px-2 py-0.5 rounded text-xs font-mono">{key}</kbd>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Header */}
@@ -863,10 +943,33 @@ export default function NotebookPage() {
               <div className="absolute right-0 top-full mt-1 z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-[180px]">
                 {notebook.messages.length > 0 && (
                   <button
-                    onClick={() => {
-                      setHeaderMenuOpen(false);
-                      clearChat();
-                    }}
+                    onClick={() => { setHeaderMenuOpen(false); exportChat(); }}
+                    className="w-full px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 text-left flex items-center gap-2"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export chat
+                  </button>
+                )}
+                {notebook.notes.length > 0 && (
+                  <button
+                    onClick={() => { setHeaderMenuOpen(false); exportNotes(); }}
+                    className="w-full px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 text-left flex items-center gap-2"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export notes
+                  </button>
+                )}
+                <button
+                  onClick={() => { setHeaderMenuOpen(false); setShowShortcuts(true); }}
+                  className="w-full px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 text-left flex items-center gap-2"
+                >
+                  <Keyboard className="w-3.5 h-3.5" />
+                  Keyboard shortcuts
+                </button>
+                <div className="border-t border-surface-700 my-1" />
+                {notebook.messages.length > 0 && (
+                  <button
+                    onClick={() => { setHeaderMenuOpen(false); clearChat(); }}
                     className="w-full px-3 py-2 text-sm text-surface-300 hover:bg-surface-700 text-left flex items-center gap-2"
                   >
                     <MessageSquareX className="w-3.5 h-3.5" />
@@ -874,10 +977,7 @@ export default function NotebookPage() {
                   </button>
                 )}
                 <button
-                  onClick={() => {
-                    setHeaderMenuOpen(false);
-                    deleteNotebook();
-                  }}
+                  onClick={() => { setHeaderMenuOpen(false); deleteNotebook(); }}
                   className="w-full px-3 py-2 text-sm text-red-400 hover:bg-surface-700 text-left flex items-center gap-2"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -1307,7 +1407,7 @@ export default function NotebookPage() {
                   />
                 ) : (
                   <div className="prose-chat max-w-none text-sm text-surface-300">
-                    <ReactMarkdown>{selectedNote.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedNote.content}</ReactMarkdown>
                   </div>
                 )}
               </div>
@@ -1367,7 +1467,7 @@ export default function NotebookPage() {
                     >
                       {msg.role === "assistant" ? (
                         <div className="prose-chat">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         </div>
                       ) : (
                         msg.content
